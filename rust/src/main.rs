@@ -41,10 +41,13 @@ const SECTION_PAD: f64 = 5.0;
 
 #[derive(Clone)]
 struct Ctx {
-    static_html: PathBuf,
     ytdlp: String,
     ffmpeg: Option<PathBuf>,
 }
+
+// the whole UI is compiled into the binary, so the server runs correctly
+// from any working directory (hosts don't always start it in /app)
+const INDEX_HTML: &str = include_str!("../../static/index.html");
 
 // ------------------------------------------------------------------- main ---
 
@@ -56,16 +59,12 @@ async fn main() {
         Err(_) => free_port(8765),
     };
 
-    let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let static_html = base.join("static").join("index.html");
-
     let ffmpeg = find_ffmpeg();
     if ffmpeg.is_none() {
         eprintln!("WARNING: FFmpeg not found — install it or set SNAPCLIP_FFMPEG");
     }
 
     let ctx = Ctx {
-        static_html,
         ytdlp: std::env::var("SNAPCLIP_YTDLP").unwrap_or_else(|_| "yt-dlp".into()),
         ffmpeg,
     };
@@ -228,12 +227,12 @@ fn hms(sec: f64) -> String {
     format!("{}:{:02}:{:02}", s / 3600, s % 3600 / 60, s % 60)
 }
 
-fn section_range(start: f64, end: f64, duration: f64) -> (f64, f64) {
-    let s = (start - SECTION_PAD).max(0.0);
+fn section_range(start: f64, end: f64, duration: f64, pad: f64) -> (f64, f64) {
+    let s = (start - pad).max(0.0);
     let e = if duration > 0.0 {
-        end.min(duration) + SECTION_PAD
+        end.min(duration) + pad
     } else {
-        end + SECTION_PAD
+        end + pad
     };
     (s, e)
 }
@@ -291,11 +290,8 @@ struct UrlIn {
     url: String,
 }
 
-async fn home(State(ctx): State<Ctx>) -> Response {
-    match fs::read(&ctx.static_html).await {
-        Ok(bytes) => ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], bytes).into_response(),
-        Err(_) => err(StatusCode::NOT_FOUND, "index.html not found"),
-    }
+async fn home() -> Response {
+    ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], INDEX_HTML).into_response()
 }
 
 async fn api_config(State(ctx): State<Ctx>) -> Response {
@@ -534,7 +530,10 @@ async fn generate(ctx: &Ctx, work: &Path, q: &DownloadQuery) -> Result<(PathBuf,
     };
     let mut sec_start = 0.0;
     if trim {
-        let (s, e) = section_range(q.start, q.end, q.duration);
+        // the section is padded because yt-dlp's own section cut is
+        // keyframe/segment-aligned, not exact — the precise cut happens in
+        // the ffmpeg pass below, which needs material on both sides
+        let (s, e) = section_range(q.start, q.end, q.duration, SECTION_PAD);
         sec_start = s;
         extra.extend(["--download-sections".into(), format!("*{}-{}", hms(s), hms(e))]);
     }
@@ -559,8 +558,8 @@ async fn generate(ctx: &Ctx, work: &Path, q: &DownloadQuery) -> Result<(PathBuf,
     let out_name = final_name(&q.title, q.start, q.end, is_mp3);
     let out_path = work.join(&out_name);
 
-    if is_mp3 {
-        // yt-dlp already converted and cut the section — just rename into place
+    if is_mp3 && !trim {
+        // full mp3: yt-dlp already converted it — just rename into place
         fs::rename(&src, &out_path)
             .await
             .map_err(|e| format!("Could not finalize MP3: {e}"))?;
@@ -571,16 +570,25 @@ async fn generate(ctx: &Ctx, work: &Path, q: &DownloadQuery) -> Result<(PathBuf,
     let mut cmd = Command::new(ffmpeg);
     cmd.args(["-y", "-hide_banner", "-loglevel", "error"]);
     if trim {
-        // re-encode for frame-accurate start/end — stream copy would snap
-        // the cut to the nearest keyframe. The section file starts at
-        // sec_start, so the requested start is an offset inside it.
+        // the section file starts at sec_start, so the requested start is
+        // an offset inside it
         cmd.arg("-ss").arg(format!("{:.3}", q.start - sec_start));
         cmd.arg("-i").arg(&src);
         cmd.arg("-t").arg(format!("{:.3}", q.end - q.start));
-        cmd.args([
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
-        ]);
+        if is_mp3 {
+            // lossless copy-cut — snaps to the nearest mp3 frame (~26ms);
+            // -map 0 keeps the embedded thumbnail, id3v2.3 keeps tags
+            // readable everywhere
+            cmd.args(["-c", "copy", "-map", "0", "-id3v2_version", "3"]);
+        } else {
+            // re-encode for frame-accurate start/end — stream copy would
+            // snap the cut to the nearest keyframe, so the clip wouldn't
+            // match the selected times exactly
+            cmd.args([
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
+            ]);
+        }
     } else {
         cmd.arg("-i").arg(&src);
         cmd.args(["-c", "copy", "-movflags", "+faststart"]);
@@ -695,9 +703,11 @@ mod tests {
 
     #[test]
     fn section_range_pads_and_clamps() {
-        assert_eq!(section_range(0.0, 10.0, 60.0), (0.0, 15.0));
-        assert_eq!(section_range(10.0, 20.0, 60.0), (5.0, 25.0));
-        assert_eq!(section_range(58.0, 60.0, 60.0), (53.0, 65.0)); // may pass the end
+        assert_eq!(section_range(0.0, 10.0, 60.0, 5.0), (0.0, 15.0));
+        assert_eq!(section_range(10.0, 20.0, 60.0, 5.0), (5.0, 25.0));
+        assert_eq!(section_range(58.0, 60.0, 60.0, 5.0), (53.0, 65.0)); // may pass the end
+        // mp3 sections are exact — no padding
+        assert_eq!(section_range(2.0, 7.0, 19.0, 0.0), (2.0, 7.0));
     }
 
     #[test]

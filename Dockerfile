@@ -8,6 +8,9 @@ WORKDIR /build
 COPY rust/Cargo.toml ./
 RUN mkdir src && echo 'fn main() {}' > src/main.rs && cargo build --release
 COPY rust/src ./src
+# index.html is embedded via include_str! — it must exist relative to the
+# source tree at compile time
+COPY static /static
 # touch: host files keep their mtime, which can be older than the stub build
 # above — cargo would then think nothing changed and keep the stub binary
 RUN touch src/main.rs && cargo build --release
@@ -38,9 +41,7 @@ ADD --chmod=0755 https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dl
 
 ENV HOST=0.0.0.0 PORT=8000 SNAPCLIP_NO_OPEN=1
 WORKDIR /app
-COPY static /app/static
 COPY --from=build /build/target/release/snapclip /usr/local/bin/snapclip
-RUN chown -R snapclip:snapclip /app
 USER snapclip
 EXPOSE 8000
 ENTRYPOINT ["/usr/local/bin/snapclip"]
