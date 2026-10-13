@@ -36,14 +36,11 @@ RUN apt-get update \
 # pull a newer yt-dlp release.
 ADD --chmod=0755 https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux /usr/local/bin/yt-dlp
 
-ENV HOST=0.0.0.0 PORT=8000 \
-    SNAPCLIP_DOWNLOADS=/data/downloads \
-    SNAPCLIP_NO_OPEN=1
+ENV HOST=0.0.0.0 PORT=8000 SNAPCLIP_NO_OPEN=1
 WORKDIR /app
 COPY static /app/static
 COPY --from=build /build/target/release/snapclip /usr/local/bin/snapclip
-RUN mkdir -p /data/downloads && chown -R snapclip:snapclip /data /app
+RUN chown -R snapclip:snapclip /app
 USER snapclip
-VOLUME /data/downloads
 EXPOSE 8000
 ENTRYPOINT ["/usr/local/bin/snapclip"]

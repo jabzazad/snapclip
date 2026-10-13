@@ -127,7 +127,7 @@
     <div class="tag">Download &amp; trim videos from YouTube, Facebook &amp; TikTok — MP4 or MP3</div>
   </header>
 
-  <div class="warn" id="ffmpegWarn">⚠ Server is missing FFmpeg. Run: <code>pip install imageio-ffmpeg</code>, then restart.</div>
+  <div class="warn" id="ffmpegWarn">⚠ Server is missing FFmpeg — install it (or set <code>SNAPCLIP_FFMPEG</code>), then restart.</div>
 
   <!-- STEP 1 : URL -->
   <section class="card">
@@ -203,16 +203,14 @@
     <button class="btn big" id="dlBtn">⬇&nbsp;&nbsp;Download</button>
 
     <div class="prog hidden" id="progBox">
-      <div class="bar"><div id="progFill"></div></div>
       <div class="stage" id="progStage"></div>
     </div>
-    <div class="done hidden" id="doneBox"></div>
     <div class="error hidden" id="dlError"></div>
   </section>
 
   <!-- HISTORY -->
   <section class="card hidden" id="histCard">
-    <h3>Recent downloads <span style="text-transform:none;letter-spacing:0">(kept 1 hour)</span></h3>
+    <h3>Recent downloads <span style="text-transform:none;letter-spacing:0">(this browser session — the server keeps nothing)</span></h3>
     <div id="histList"></div>
   </section>
 
@@ -455,76 +453,38 @@ $("previewBtn").addEventListener("click",previewNow);
   });
 });
 
-/* ---------- download ---------- */
+/* ---------- download (stateless: the clip is generated inside one request
+   and streamed straight to the browser — the server keeps nothing) ---------- */
 $("dlBtn").addEventListener("click",startDownload);
 
-async function startDownload(){
+function startDownload(){
   $("dlError").classList.add("hidden");
-  $("doneBox").classList.add("hidden");
   const isFull = trim.start<=0.01 && trim.end>=state.duration-0.01;
-  const body={
+  const qs=new URLSearchParams({
     url:state.url, fmt:state.fmt, title:state.title, duration:state.duration,
     quality: state.fmt==="mp4" ? $("qVideo").value : $("qAudio").value,
     start: isFull?0:+trim.start.toFixed(2),
     end:   isFull?-1:+trim.end.toFixed(2),
-  };
-  const btn=$("dlBtn"); btn.disabled=true;
+  });
+  const url="/api/download?"+qs;
+  addHistory(url, state.title || "video");
   $("progBox").classList.remove("hidden");
-  setProg(0,"Starting…","");
-  try{
-    const r=await fetch("/api/download",{method:"POST",
-      headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    const d=await r.json();
-    if(!r.ok) throw new Error(d.detail||"Download failed");
-    poll(d.job_id);
-  }catch(e){
-    $("progBox").classList.add("hidden");
-    showErr($("dlError"),e.message); btn.disabled=false;
-  }
-}
-function setProg(p,stage,extra){
-  $("progFill").style.width=p+"%";
-  $("progStage").textContent=stage+(" "+extra).trim();
-}
-function poll(id){
-  const tick=async()=>{
-    try{
-      const j=await(await fetch("/api/progress/"+id)).json();
-      if(j.status==="running"){
-        let extra=[j.speed,j.eta&&"ETA "+j.eta].filter(Boolean).join(" • ");
-        setProg(j.progress, j.stage+" "+Math.round(j.progress)+"%", extra&&"• "+extra);
-        setTimeout(tick,800);
-      }else if(j.status==="done"){
-        setProg(100,"Done","");
-        $("progBox").classList.add("hidden");
-        const box=$("doneBox");
-        box.innerHTML=`✓ Saved <b>${escapeHtml(j.filename)}</b> <span class="mb">(${mb(j.size)})</span> — `
-          +`<a href="/api/file/${id}">save again</a>`;
-        box.classList.remove("hidden");
-        addHistory(id,j.filename,j.size);
-        const a=document.createElement("a");
-        a.href="/api/file/"+id; a.download="";
-        document.body.appendChild(a); a.click(); a.remove();
-        $("dlBtn").disabled=false;
-      }else{
-        $("progBox").classList.add("hidden");
-        showErr($("dlError"),j.error||"Download failed");
-        $("dlBtn").disabled=false;
-      }
-    }catch{ setTimeout(tick,1500); }
-  };
-  tick();
+  $("progStage").textContent="Generating on the fly — the file streams straight to your browser, nothing is kept on the server…";
+  const a=document.createElement("a");
+  a.href=url; a.download="";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>{ $("progBox").classList.add("hidden"); }, 4000);
 }
 function escapeHtml(s){ return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 
-/* ---------- history ---------- */
+/* ---------- history (browser session only) ---------- */
 const history=[];
-function addHistory(id,name,size){
-  history.unshift({id,name,size});
+function addHistory(url,name){
+  history.unshift({url,name:name+" "+((state.fmt==="mp3")?"· MP3":"· MP4")});
   $("histCard").classList.remove("hidden");
   $("histList").innerHTML=history.map(h=>
     `<div class="hist-item"><span class="nm">🎬 ${escapeHtml(h.name)}</span>`
-    +`<a href="/api/file/${h.id}">⬇ ${mb(h.size)}</a></div>`).join("");
+    +`<a href="${escapeHtml(h.url)}">⬇ again</a></div>`).join("");
 }
 </script>
 </body>
