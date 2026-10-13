@@ -61,7 +61,10 @@ async fn main() {
 
     let ffmpeg = find_ffmpeg();
     if ffmpeg.is_none() {
-        eprintln!("WARNING: FFmpeg not found — install it or set SNAPCLIP_FFMPEG");
+        eprintln!(
+            "WARNING: FFmpeg not found — checked $SNAPCLIP_FFMPEG, {}, then $PATH",
+            FFMPEG_CANDIDATES.join(", ")
+        );
     }
 
     let ctx = Ctx {
@@ -155,17 +158,17 @@ fn find_bin(env_key: &str, name: &str, extra: &[&str]) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
+/// Absolute locations probed before falling back to PATH — kept in one place
+/// so the startup warning can print exactly what was checked.
+const FFMPEG_CANDIDATES: &[&str] = &[
+    "/usr/local/bin/ffmpeg",
+    "/usr/bin/ffmpeg",
+    "/opt/ffmpeg/bin/ffmpeg",
+    "/bin/ffmpeg",
+];
+
 fn find_ffmpeg() -> Option<PathBuf> {
-    find_bin(
-        "SNAPCLIP_FFMPEG",
-        "ffmpeg",
-        &[
-            "/usr/local/bin/ffmpeg",
-            "/usr/bin/ffmpeg",
-            "/opt/ffmpeg/bin/ffmpeg",
-            "/bin/ffmpeg",
-        ],
-    )
+    find_bin("SNAPCLIP_FFMPEG", "ffmpeg", FFMPEG_CANDIDATES)
 }
 
 fn find_ytdlp() -> String {
