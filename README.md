@@ -83,4 +83,7 @@ snapclip/
 | `SNAPCLIP_TMP` | system temp | where request-scoped scratch dirs are created |
 | `SNAPCLIP_YTDLP` | `yt-dlp` | yt-dlp binary to invoke |
 | `SNAPCLIP_FFMPEG` | search `PATH` | ffmpeg binary to invoke |
+| `SNAPCLIP_COOKIES` | unset | Netscape-format cookie file **contents** (written to a temp file) — needed on cloud hosts where YouTube shows "Sign in to confirm you're not a bot" |
+| `SNAPCLIP_COOKIES_FILE` | unset | path to an existing cookies file (wins over `SNAPCLIP_COOKIES`) |
+| `SNAPCLIP_PROXY` | unset | proxy URL passed to yt-dlp (`--proxy`) — residential proxies avoid platform bot checks |
 | `SNAPCLIP_NO_OPEN` | unset | `1` = don't auto-open the browser |

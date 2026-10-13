@@ -8,6 +8,8 @@
 //! Run:  cargo run --release   ->  http://127.0.0.1:<port>
 //!
 //! Env vars: HOST, PORT, SNAPCLIP_TMP, SNAPCLIP_YTDLP, SNAPCLIP_FFMPEG,
+//!           SNAPCLIP_COOKIES / SNAPCLIP_COOKIES_FILE (yt-dlp cookies for
+//!           platforms that block cloud IPs), SNAPCLIP_PROXY (yt-dlp --proxy),
 //!           SNAPCLIP_NO_OPEN=1 (don't auto-open the browser)
 
 use std::{
@@ -43,6 +45,8 @@ const SECTION_PAD: f64 = 5.0;
 struct Ctx {
     ytdlp: String,
     ffmpeg: Option<PathBuf>,
+    cookies: Option<PathBuf>,
+    proxy: Option<String>,
 }
 
 // the whole UI is compiled into the binary, so the server runs correctly
@@ -70,6 +74,8 @@ async fn main() {
     let ctx = Ctx {
         ytdlp: find_ytdlp(),
         ffmpeg,
+        cookies: resolve_cookies(),
+        proxy: std::env::var("SNAPCLIP_PROXY").ok().filter(|p| !p.trim().is_empty()),
     };
     println!("  yt-dlp : {}", ctx.ytdlp);
     println!(
@@ -78,6 +84,13 @@ async fn main() {
             .as_ref()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| "NOT FOUND".into())
+    );
+    println!(
+        "  cookies: {}",
+        ctx.cookies
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "none".into())
     );
 
     let app = Router::new()
@@ -205,6 +218,40 @@ fn find_ytdlp() -> String {
     .unwrap_or_else(|| "yt-dlp".into())
 }
 
+/// yt-dlp cookies for platforms that block cloud IPs (YouTube's bot check):
+/// `SNAPCLIP_COOKIES_FILE` points at a Netscape-format cookies file, or
+/// `SNAPCLIP_COOKIES` holds the file contents and is materialized to a temp
+/// file — env vars are the only practical way to ship cookies to a host like
+/// Vercel.
+fn resolve_cookies() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("SNAPCLIP_COOKIES_FILE") {
+        let p = PathBuf::from(p);
+        if p.is_file() {
+            return Some(p);
+        }
+        eprintln!("WARNING: SNAPCLIP_COOKIES_FILE does not exist: {p:?}");
+    }
+    let raw = std::env::var("SNAPCLIP_COOKIES").ok()?;
+    if raw.trim().is_empty() {
+        return None;
+    }
+    let dir = std::env::var("SNAPCLIP_TMP")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir());
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        eprintln!("WARNING: could not create cookie dir {dir:?}: {e}");
+        return None;
+    }
+    let p = dir.join("snapclip-cookies.txt");
+    match std::fs::write(&p, raw) {
+        Ok(()) => Some(p),
+        Err(e) => {
+            eprintln!("WARNING: could not write cookie file to {p:?}: {e}");
+            None
+        }
+    }
+}
+
 fn ytdlp(ctx: &Ctx, extra: &[String]) -> Command {
     let mut c = Command::new(&ctx.ytdlp);
     c.args([
@@ -220,6 +267,12 @@ fn ytdlp(ctx: &Ctx, extra: &[String]) -> Command {
     ]);
     if let Some(ff) = &ctx.ffmpeg {
         c.arg("--ffmpeg-location").arg(ff);
+    }
+    if let Some(ck) = &ctx.cookies {
+        c.arg("--cookies").arg(ck);
+    }
+    if let Some(px) = &ctx.proxy {
+        c.arg("--proxy").arg(px);
     }
     c.args(extra);
     c.stdin(Stdio::null());
