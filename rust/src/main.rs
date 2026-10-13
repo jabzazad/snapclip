@@ -97,7 +97,31 @@ async fn main() {
     println!("  SnapClip running at  http://{shown}:{port}");
     maybe_open_browser(&host, port);
 
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .unwrap();
+}
+
+/// Stop serving on Ctrl+C or SIGTERM, letting in-flight downloads finish —
+/// platforms that scale to zero (e.g. Vercel containers) send SIGTERM.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c().await.expect("ctrl_c handler");
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("SIGTERM handler")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
 }
 
 fn free_port(start: u16) -> u16 {

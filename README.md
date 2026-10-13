@@ -43,8 +43,9 @@ No volumes needed — there is nothing to persist.
 > generation time of the clip, so very long videos need a host with generous
 > request timeouts.
 >
-> - **Vercel** — supported via [container services](https://vercel.com/kb/guide/deploy-rust-on-vercel-with-docker)
->   (the container runs as an autoscaling Function). Best for clips; the
+> - **Vercel** — ready out of the box: `vercel.json` + `Dockerfile.vercel`
+>   (in this repo) use [container services](https://vercel.com/kb/guide/deploy-rust-on-vercel-with-docker)
+>   — the container runs as an autoscaling Function. Best for clips; the
 >   function time limit caps how long a single generation may run.
 > - **Railway / Render** — "Deploy from Dockerfile", done. No time limits.
 > - **Fly.io** — `fly launch` then `fly deploy`.
