@@ -1,0 +1,8 @@
+downloads/
+rust/target/
+task/
+.git/
+*.md
+Dockerfile
+docker-compose.yml
+.dockerignore

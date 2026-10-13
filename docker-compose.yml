@@ -1,0 +1,12 @@
+services:
+  snapclip:
+    build: .
+    container_name: snapclip
+    ports:
+      - "8000:8000"
+    volumes:
+      - snapclip-downloads:/data/downloads
+    restart: unless-stopped
+
+volumes:
+  snapclip-downloads:
