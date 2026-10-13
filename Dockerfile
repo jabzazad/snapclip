@@ -33,11 +33,15 @@ RUN apt-get update \
  && mv /tmp/ff/lib /opt/ffmpeg/lib \
  && strip --strip-all /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe \
  && ln -s /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/ \
+ && ln -s /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/bin/ \
  && rm -rf /tmp/ff /tmp/ff.tar.xz
 # standalone yt-dlp binary (self-contained, needs no runtime installed). If
 # YouTube starts failing with "Sign in to confirm...", rebuild the image to
 # pull a newer yt-dlp release.
 ADD --chmod=0755 https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux /usr/local/bin/yt-dlp
+# hosts may override PATH at runtime — keep both binaries reachable
+# regardless; the server also probes these absolute paths directly
+RUN ln -sf /usr/local/bin/yt-dlp /usr/bin/yt-dlp
 
 ENV HOST=0.0.0.0 PORT=8000 SNAPCLIP_NO_OPEN=1
 WORKDIR /app

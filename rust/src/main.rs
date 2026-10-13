@@ -65,9 +65,17 @@ async fn main() {
     }
 
     let ctx = Ctx {
-        ytdlp: std::env::var("SNAPCLIP_YTDLP").unwrap_or_else(|_| "yt-dlp".into()),
+        ytdlp: find_ytdlp(),
         ffmpeg,
     };
+    println!("  yt-dlp : {}", ctx.ytdlp);
+    println!(
+        "  ffmpeg : {}",
+        ctx.ffmpeg
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "NOT FOUND".into())
+    );
 
     let app = Router::new()
         .route("/", get(home))
@@ -124,18 +132,50 @@ fn open_url(url: &str) {
 
 // ---------------------------------------------------------------- ffmpeg ---
 
-fn find_ffmpeg() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("SNAPCLIP_FFMPEG") {
-        let p = PathBuf::from(p);
-        if p.exists() {
+/// Resolve an external binary: SNAPCLIP_* env override, then well-known
+/// absolute locations (hosts may run the container with a stripped PATH),
+/// then a PATH scan.
+fn find_bin(env_key: &str, name: &str, extra: &[&str]) -> Option<PathBuf> {
+    if let Ok(p) = std::env::var(env_key) {
+        let p = PathBuf::from(&p);
+        if p.is_file() {
             return Some(p);
         }
     }
-    let exe = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+    for c in extra {
+        let p = PathBuf::from(c);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    let exe = if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
-        .map(|dir| dir.join(exe))
+        .map(|dir| dir.join(&exe))
         .find(|p| p.is_file())
+}
+
+fn find_ffmpeg() -> Option<PathBuf> {
+    find_bin(
+        "SNAPCLIP_FFMPEG",
+        "ffmpeg",
+        &[
+            "/usr/local/bin/ffmpeg",
+            "/usr/bin/ffmpeg",
+            "/opt/ffmpeg/bin/ffmpeg",
+            "/bin/ffmpeg",
+        ],
+    )
+}
+
+fn find_ytdlp() -> String {
+    find_bin(
+        "SNAPCLIP_YTDLP",
+        "yt-dlp",
+        &["/usr/local/bin/yt-dlp", "/usr/bin/yt-dlp"],
+    )
+    .map(|p| p.to_string_lossy().into_owned())
+    .unwrap_or_else(|| "yt-dlp".into())
 }
 
 fn ytdlp(ctx: &Ctx, extra: &[String]) -> Command {
